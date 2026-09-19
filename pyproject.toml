@@ -1,0 +1,22 @@
+[project]
+name = "db-agent-skills"
+version = "0.1.0"
+description = "A Deep Agents database assistant with audited SQLite skills"
+readme = "README.md"
+authors = [
+    { name = "David Ojo", email = "conceptcodes@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents>=0.7.15",
+    "langchain-community>=0.4.2",
+    "langchain-openrouter>=0.2.8",
+    "pydantic-settings>=2.10.1",
+]
+
+[project.scripts]
+db-agent-skills = "db_agent_skills:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
