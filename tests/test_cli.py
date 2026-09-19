@@ -15,6 +15,10 @@ from db_agent_skills.cli import (
     response_text,
     stream_agent_response,
 )
+from db_agent_skills.constants import (
+    MAX_MODEL_CALLS_PER_RUN,
+    MAX_TOOL_CALLS_PER_RUN,
+)
 
 
 class FakeStreamingAgent:
@@ -58,6 +62,29 @@ class FakeStreamingAgent:
                 result_message,
                 final_message,
             ]
+        }
+
+
+class FakeLimitStoppedAgent:
+    def __init__(self, node_name: str, message: str) -> None:
+        self.node_name = node_name
+        self.message = message
+
+    def stream(
+        self,
+        _invocation: dict[str, Any],
+        *,
+        config: dict[str, Any],
+        stream_mode: list[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
+        del config, stream_mode
+        user_message = HumanMessage(content="Research the database")
+        yield "values", {"messages": [user_message]}
+        yield "updates", {
+            self.node_name: {
+                "messages": [AIMessage(content=self.message)],
+                "jump_to": "end",
+            }
         }
 
 
@@ -105,15 +132,55 @@ class CliTests(unittest.TestCase):
         self.assertIn("Response ready", trace)
         self.assertEqual(answer, "There are **830 orders**.")
 
+    def test_surfaces_model_call_limit_terminal_update(self) -> None:
+        self._assert_limit_stop_is_visible(
+            "ModelCallLimitMiddleware.before_model",
+            "Model call limits exceeded: run limit (16/16)",
+            f"safety limit of {MAX_MODEL_CALLS_PER_RUN} model calls",
+        )
+
+    def test_surfaces_tool_call_limit_terminal_update(self) -> None:
+        self._assert_limit_stop_is_visible(
+            "ToolCallLimitMiddleware.after_model",
+            "Tool call limit reached: run limit exceeded (25/24 calls).",
+            f"safety limit of {MAX_TOOL_CALLS_PER_RUN} tool calls",
+        )
+
     def test_trace_preview_redacts_secrets_and_has_a_size_limit(self) -> None:
         preview = _safe_preview(
-            {"authorization": "Bearer should-not-appear", "result": "x" * 100},
-            limit=60,
+            {
+                "authorization": "Bearer should-not-appear",
+                "card": "5105-1051-0510-5100",
+                "result": "x" * 100,
+            },
+            limit=120,
         )
 
         self.assertNotIn("should-not-appear", preview)
+        self.assertNotIn("5105-1051-0510-5100", preview)
+        self.assertIn("****-****-****-5100", preview)
         self.assertIn("[REDACTED]", preview)
         self.assertIn("characters omitted", preview)
+
+    def _assert_limit_stop_is_visible(
+        self,
+        node_name: str,
+        internal_message: str,
+        expected_message: str,
+    ) -> None:
+        output = io.StringIO()
+        console = Console(file=output, color_system=None, width=100)
+
+        answer = stream_agent_response(
+            FakeLimitStoppedAgent(node_name, internal_message),
+            {"messages": [{"role": "user", "content": "Research the database"}]},
+            {"configurable": {"thread_id": "test-thread"}},
+            console=console,
+        )
+
+        self.assertIn("Request stopped by a guardrail", output.getvalue())
+        self.assertIn(expected_message, answer)
+        self.assertNotEqual(answer, internal_message)
 
 
 if __name__ == "__main__":

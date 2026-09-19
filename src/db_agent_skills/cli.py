@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from langchain.agents.middleware import PIIDetectionError
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 from rich.console import Console
@@ -17,6 +18,10 @@ from rich.text import Text
 from rich.theme import Theme
 
 from db_agent_skills.config import get_settings
+from db_agent_skills.constants import (
+    MAX_MODEL_CALLS_PER_RUN,
+    MAX_TOOL_CALLS_PER_RUN,
+)
 
 
 MAX_INPUT_CHARACTERS = 8_000
@@ -30,6 +35,9 @@ _SECRET_PATTERNS = (
         r"(?i)\b(bearer|api[_-]?key|authorization|password|secret|token)"
         r"(\s*[:=]\s*)\S+"
     ),
+)
+_PAYMENT_CARD_PATTERN = re.compile(
+    r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?(\d{4})\b"
 )
 _SENSITIVE_FIELD_NAMES = frozenset(
     {"api_key", "authorization", "password", "secret", "token"}
@@ -86,8 +94,41 @@ def response_text(messages: Sequence[BaseMessage]) -> str:
     if not messages:
         return "The agent returned no messages."
 
-    text = messages[-1].text.strip()
+    final_message = messages[-1]
+    if not isinstance(final_message, AIMessage) or final_message.tool_calls:
+        return "The agent stopped before producing a final response."
+
+    text = final_message.text.strip()
     return text or "The agent returned an empty response."
+
+
+def _latest_ai_response(messages: Sequence[BaseMessage]) -> str | None:
+    """Return the latest complete AI response from one stream update."""
+    for message in reversed(messages):
+        if not isinstance(message, AIMessage) or message.tool_calls:
+            continue
+        text = message.text.strip()
+        if text:
+            return text
+    return None
+
+
+def _guardrail_stop_response(node_name: str, fallback: str) -> str:
+    """Translate internal call-limit stops into actionable user messages."""
+    if node_name.startswith("ModelCallLimitMiddleware."):
+        return (
+            "I stopped this request after it reached the safety limit of "
+            f"{MAX_MODEL_CALLS_PER_RUN} model calls without finishing. "
+            "Try a narrower question or start a new conversation."
+        )
+    if node_name.startswith("ToolCallLimitMiddleware."):
+        return (
+            "I stopped this request after it reached the safety limit of "
+            f"{MAX_TOOL_CALLS_PER_RUN} tool calls without finishing. "
+            "Review the activity trace for repeated calls, then try a narrower "
+            "question."
+        )
+    return fallback
 
 
 def _safe_preview(value: Any, *, limit: int = MAX_TRACE_CHARACTERS) -> str:
@@ -130,6 +171,10 @@ def _safe_preview(value: Any, *, limit: int = MAX_TRACE_CHARACTERS) -> str:
             ),
             preview,
         )
+    preview = _PAYMENT_CARD_PATTERN.sub(
+        lambda match: f"****-****-****-{match.group(1)}",
+        preview,
+    )
 
     if len(preview) <= limit:
         return preview
@@ -172,6 +217,10 @@ def _print_activity_update(console: Console, update: Any) -> None:
     for node_name, node_update in update.items():
         messages = _update_messages(node_update)
         rendered_message = False
+        stopped = (
+            isinstance(node_update, Mapping)
+            and node_update.get("jump_to") == "end"
+        )
 
         for message in messages:
             if isinstance(message, AIMessage):
@@ -187,7 +236,12 @@ def _print_activity_update(console: Console, update: Any) -> None:
                             border_style="magenta",
                         )
                 else:
-                    console.print("  [success]✓ Response ready[/success]")
+                    if stopped:
+                        console.print(
+                            "  [warning]⚠ Request stopped by a guardrail[/warning]"
+                        )
+                    else:
+                        console.print("  [success]✓ Response ready[/success]")
                 rendered_message = True
                 continue
 
@@ -221,6 +275,8 @@ def stream_agent_response(
 ) -> str:
     """Stream agent activity and return the final response text."""
     final_state: Mapping[str, Any] = {}
+    streamed_response: str | None = None
+    guardrail_response: str | None = None
     console.rule("[activity]Activity[/activity]", style="bright_blue")
 
     try:
@@ -240,10 +296,35 @@ def stream_agent_response(
                 if stream_mode == "updates":
                     status.update("[accent]Agent is working…[/accent]")
                     _print_activity_update(console, chunk)
+                    if isinstance(chunk, Mapping):
+                        for node_name, node_update in chunk.items():
+                            response = _latest_ai_response(
+                                _update_messages(node_update)
+                            )
+                            if response is not None:
+                                streamed_response = response
+                                if (
+                                    isinstance(node_update, Mapping)
+                                    and node_update.get("jump_to") == "end"
+                                ):
+                                    guardrail_response = _guardrail_stop_response(
+                                        str(node_name),
+                                        response,
+                                    )
     finally:
         console.rule(style="bright_blue")
 
-    return response_text(_update_messages(final_state))
+    if guardrail_response is not None:
+        return guardrail_response
+
+    final_messages = _update_messages(final_state)
+    if final_messages:
+        final_response = _latest_ai_response(final_messages[-1:])
+        if final_response is not None:
+            return final_response
+    if streamed_response is not None:
+        return streamed_response
+    return response_text(final_messages)
 
 
 def _database_label(database_url: str) -> str:
@@ -362,6 +443,12 @@ def run_chat(
                 "Review the activity trace for repeated tool calls. If it was still "
                 "making progress, restart with a larger value such as "
                 f"--recursion-limit {recursion_limit * 2}.",
+            )
+            continue
+        except PIIDetectionError:
+            _print_error(
+                console,
+                "A credential-like value was detected. Remove it and try again.",
             )
             continue
         except Exception as error:  # noqa: BLE001 - CLI boundary
