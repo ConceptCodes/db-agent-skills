@@ -117,6 +117,7 @@ export DB_AGENT_DATABASE_URL="sqlite:///${PWD}/data/northwind.db"
 - [`model.py`](src/db_agent_skills/model.py) resolves the SQL toolkit's query-checker model.
 - [`tools.py`](src/db_agent_skills/tools.py) creates the LangChain `SQLDatabase` and `SQLDatabaseToolkit`.
 - [`prompts.py`](src/db_agent_skills/prompts.py) defines the read-first, bounded-query, no-guessing policy.
+- [`guardrails.py`](src/db_agent_skills/guardrails.py) rejects requests outside read-only database research, limits model and tool calls, and filters sensitive data.
 - [`backend.py`](src/db_agent_skills/backend.py) mounts bundled skills at `/skills/`, denies agent file-tool writes there, and keeps other agent files in state.
 - [`agent.py`](src/db_agent_skills/agent.py) constructs the Deep Agent with the project skill source and an in-memory checkpointer.
 - `skills/` provides progressively loaded, database-specific domain knowledge.
@@ -124,7 +125,7 @@ export DB_AGENT_DATABASE_URL="sqlite:///${PWD}/data/northwind.db"
 The system prompt instructs the agent to inspect the selected database, load the applicable skill, verify join grain and date boundaries, and treat database contents as untrusted data before answering.
 
 Deep Agents handles skill discovery and progressive loading through the agent's `skills=["/skills/"]` configuration and the composite backend's restricted `/skills/` mount; the CLI does not duplicate that behavior.
-The main model remains a provider-qualified string passed to `create_deep_agent`; the SQL toolkit resolves a separate instance because its query checker requires a `BaseLanguageModel` object.
+The main model remains a provider-qualified string passed to `create_deep_agent`; the SQL query checker and scope classifier share a separate instance because they require a `BaseLanguageModel` object.
 
 ## Project structure
 
@@ -144,6 +145,8 @@ The main model remains a provider-qualified string passed to `create_deep_agent`
 │   ├── agent.py
 │   ├── backend.py
 │   ├── config.py
+│   ├── constants.py
+│   ├── guardrails.py
 │   ├── model.py
 │   ├── prompts.py
 │   └── tools.py
@@ -163,6 +166,9 @@ The main model remains a provider-qualified string passed to `create_deep_agent`
 
 - SQLite connections use URI `mode=ro`, `PRAGMA query_only = ON`, and a SQLite authorizer that rejects mutations, database attachment, and file-oriented functions.
 - Host-filesystem access is restricted to the bundled `/skills/` mount, and file-tool writes to that mount are denied. Other agent files use the in-memory state backend.
+- A fail-closed scope classifier rejects unrelated requests before the main agent or database tools run. It uses one structured model call with bounded recent context per user message, preserving database follow-ups while rejecting classification failures.
+- LangChain middleware limits each request to 16 model calls and 24 tool calls. If either limit is reached, the activity trace marks the guardrail stop and the CLI explains which limit ended the request.
+- Credential-like values are blocked in user input and redacted from tool results and model output. Valid payment-card numbers are masked.
 - Conversation checkpoints are held in memory and are lost when the process exits.
 - User input should be bound as query parameters whenever the calling interface supports them.
 - Database values and retrieved documents are data, not instructions for the agent or shell.
