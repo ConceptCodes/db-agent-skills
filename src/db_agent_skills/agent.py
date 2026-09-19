@@ -1,7 +1,6 @@
 import os
 
 from deepagents import create_deep_agent
-from langchain.agents.middleware import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
 from db_agent_skills.backend import (
@@ -29,7 +28,6 @@ agent = create_deep_agent(
     model=settings.model,
     tools=db_toolkit.get_tools(),
     system_prompt=SYSTEM_PROMPT,
-    middleware=[TodoListMiddleware()],
     skills=[SKILLS_SOURCE],
     backend=backend,
     permissions=create_agent_permissions(),

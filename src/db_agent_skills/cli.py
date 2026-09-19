@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -20,7 +21,7 @@ from db_agent_skills.config import get_settings
 
 MAX_INPUT_CHARACTERS = 8_000
 MAX_TRACE_CHARACTERS = 2_000
-DEFAULT_RECURSION_LIMIT = 25
+DEFAULT_RECURSION_LIMIT = 50
 
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _SECRET_PATTERNS = (
@@ -222,24 +223,26 @@ def stream_agent_response(
     final_state: Mapping[str, Any] = {}
     console.rule("[activity]Activity[/activity]", style="bright_blue")
 
-    with console.status(
-        "[accent]Waiting for the agent…[/accent]",
-        spinner="dots",
-        spinner_style="bright_cyan",
-    ) as status:
-        for stream_mode, chunk in chat_agent.stream(
-            dict(invocation),
-            config=dict(config),
-            stream_mode=["updates", "values"],
-        ):
-            if stream_mode == "values" and isinstance(chunk, Mapping):
-                final_state = chunk
-                continue
-            if stream_mode == "updates":
-                status.update("[accent]Agent is working…[/accent]")
-                _print_activity_update(console, chunk)
+    try:
+        with console.status(
+            "[accent]Waiting for the agent…[/accent]",
+            spinner="dots",
+            spinner_style="bright_cyan",
+        ) as status:
+            for stream_mode, chunk in chat_agent.stream(
+                dict(invocation),
+                config=dict(config),
+                stream_mode=["updates", "values"],
+            ):
+                if stream_mode == "values" and isinstance(chunk, Mapping):
+                    final_state = chunk
+                    continue
+                if stream_mode == "updates":
+                    status.update("[accent]Agent is working…[/accent]")
+                    _print_activity_update(console, chunk)
+    finally:
+        console.rule(style="bright_blue")
 
-    console.rule(style="bright_blue")
     return response_text(_update_messages(final_state))
 
 
@@ -351,6 +354,15 @@ def run_chat(
             )
         except KeyboardInterrupt:
             console.print("\n[warning]Request cancelled.[/warning]")
+            continue
+        except GraphRecursionError:
+            _print_error(
+                console,
+                f"The agent used all {recursion_limit} graph steps before finishing. "
+                "Review the activity trace for repeated tool calls. If it was still "
+                "making progress, restart with a larger value such as "
+                f"--recursion-limit {recursion_limit * 2}.",
+            )
             continue
         except Exception as error:  # noqa: BLE001 - CLI boundary
             _print_error(console, str(error) or type(error).__name__)

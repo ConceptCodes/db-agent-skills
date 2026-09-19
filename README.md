@@ -58,6 +58,12 @@ uv run db-agent-skills
 
 The CLI streams an activity trace showing graph steps, tool calls, bounded tool arguments, and bounded tool results, then renders the final agent response as Markdown. It does not display private model reasoning. Conversation state remains in memory. Use `/help` to list commands, `/new` to start a fresh thread, and `/exit` to quit.
 
+Skill-guided database research can require several model and tool steps, so the CLI uses a finite 50-step budget by default. If a valid complex request is still progressing when it reaches that guardrail, restart with a higher limit:
+
+```bash
+uv run db-agent-skills --recursion-limit 100
+```
+
 ### Sample questions
 
 With the default Northwind database:

@@ -8,8 +8,10 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from rich.console import Console
 
 from db_agent_skills.cli import (
+    DEFAULT_RECURSION_LIMIT,
     _positive_integer,
     _safe_preview,
+    build_parser,
     response_text,
     stream_agent_response,
 )
@@ -74,6 +76,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(_positive_integer("5"), 5)
         with self.assertRaisesRegex(argparse.ArgumentTypeError, "at least 1"):
             _positive_integer("0")
+
+    def test_default_recursion_limit_allows_skill_workflows(self) -> None:
+        args = build_parser().parse_args([])
+
+        self.assertEqual(args.recursion_limit, DEFAULT_RECURSION_LIMIT)
+        self.assertEqual(args.recursion_limit, 50)
 
     def test_streams_tool_activity_and_returns_final_response(self) -> None:
         output = io.StringIO()
