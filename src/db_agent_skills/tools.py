@@ -7,6 +7,7 @@ from langchain_community.utilities import SQLDatabase
 from langchain_core.language_models import BaseLanguageModel
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
+from sqlalchemy.pool import QueuePool
 
 from db_agent_skills.config import DEFAULT_DATABASE_URL
 
@@ -146,6 +147,9 @@ def create_read_only_database(
     engine = create_engine(
         "sqlite+pysqlite://",
         creator=_read_only_connection_factory(database_url),
+        # The creator opens a file, but the empty URL defaults to SingletonThreadPool,
+        # which can evict active connections as agent worker threads change.
+        poolclass=QueuePool,
     )
     return SQLDatabase(engine)
 

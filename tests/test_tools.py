@@ -1,5 +1,8 @@
 import sqlite3
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -28,6 +31,42 @@ class ReadOnlyDatabaseTests(unittest.TestCase):
             "[('original',)]",
         )
         self.assertEqual(self.database.run("PRAGMA query_only"), "[(1,)]")
+
+    def test_parallel_reads_keep_active_connections_open(self) -> None:
+        # Isolate the regression: the former pool can segfault the interpreter.
+        script = textwrap.dedent('''
+            import sys
+            from concurrent.futures import ThreadPoolExecutor
+            from threading import Barrier
+            from db_agent_skills.tools import create_read_only_database
+
+            db = create_read_only_database(sys.argv[1])
+            try:
+                for _ in range(3):
+                    ready = Barrier(8, timeout=10)
+                    def read(_):
+                        with db._engine.connect() as connection:
+                            ready.wait()
+                            for _ in range(20):
+                                assert connection.exec_driver_sql(
+                                    "SELECT name FROM items"
+                                ).scalar_one() == "original"
+                            assert connection.exec_driver_sql(
+                                "PRAGMA query_only"
+                            ).scalar_one() == 1
+                    with ThreadPoolExecutor(max_workers=8) as executor:
+                        list(executor.map(read, range(8)))
+            finally:
+                db._engine.dispose()
+        ''')
+        result = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-c", script,
+             f"sqlite:///{self.database_path.as_posix()}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_writes(self) -> None:
         with self.assertRaises(SQLAlchemyError):
