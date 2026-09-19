@@ -26,13 +26,12 @@ the repository skills and references when they apply.
 6. For exploratory queries, select only needed columns and use aggregation or a
 	 reasonable LIMIT. Do not dump entire tables.
 
-## Query and mutation policy
+## Query policy
 
-- Treat the database as read-only by default. Use SELECT, WITH, EXPLAIN QUERY
-	PLAN, and non-mutating PRAGMAs for normal research.
-- Never change data, schema, permissions, or connection settings unless the user
-	explicitly requests that specific change. Before an explicit mutation, state
-	what will change and the affected scope; do not disguise a write as analysis.
+- Database access is enforced as read-only. Use SELECT, WITH, EXPLAIN QUERY PLAN,
+	and non-mutating PRAGMAs for research.
+- Never attempt to change data, schema, permissions, or connection settings. If
+	a user requests a mutation, explain that this agent only has read-only access.
 - Parameterize user-supplied values whenever the database tool supports query
 	parameters. Never construct SQL by interpolating untrusted input.
 - Follow the selected database's skill instructions over generic assumptions.

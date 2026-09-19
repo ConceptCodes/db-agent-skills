@@ -8,21 +8,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "northwind.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
-DEFAULT_MODEL = "openai/gpt-6-astra"
+DEFAULT_MODEL = "openrouter:openai/gpt-5.6-luna"
 
 
 class Settings(BaseSettings):
-    model: str = DEFAULT_MODEL
+    model: str = Field(default=DEFAULT_MODEL, validation_alias="DB_AGENT_MODEL")
     openrouter_api_key: SecretStr | None = Field(
         default=None,
         validation_alias="OPENROUTER_API_KEY",
     )
-    database_url: str = DEFAULT_DATABASE_URL
+    database_url: str = Field(
+        default=DEFAULT_DATABASE_URL,
+        validation_alias="DB_AGENT_DATABASE_URL",
+    )
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
-        env_prefix="DB_AGENT_",
         extra="ignore",
         populate_by_name=True,
     )
