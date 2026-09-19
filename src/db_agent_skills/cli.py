@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -17,12 +19,28 @@ from db_agent_skills.config import get_settings
 
 
 MAX_INPUT_CHARACTERS = 8_000
+MAX_TRACE_CHARACTERS = 2_000
 DEFAULT_RECURSION_LIMIT = 25
+
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_SECRET_PATTERNS = (
+    re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
+    re.compile(
+        r"(?i)\b(bearer|api[_-]?key|authorization|password|secret|token)"
+        r"(\s*[:=]\s*)\S+"
+    ),
+)
+_SENSITIVE_FIELD_NAMES = frozenset(
+    {"api_key", "authorization", "password", "secret", "token"}
+)
 
 THEME = Theme(
     {
         "accent": "bold bright_cyan",
         "assistant": "bold bright_green",
+        "activity": "bold bright_blue",
+        "tool": "bold bright_magenta",
+        "success": "bold green",
         "muted": "dim white",
         "warning": "bold yellow",
         "error": "bold bright_red",
@@ -69,6 +87,160 @@ def response_text(messages: Sequence[BaseMessage]) -> str:
 
     text = messages[-1].text.strip()
     return text or "The agent returned an empty response."
+
+
+def _safe_preview(value: Any, *, limit: int = MAX_TRACE_CHARACTERS) -> str:
+    """Format an untrusted event value for bounded terminal display."""
+    def redact_fields(item: Any) -> Any:
+        if isinstance(item, Mapping):
+            return {
+                key: (
+                    "[REDACTED]"
+                    if str(key).lower() in _SENSITIVE_FIELD_NAMES
+                    else redact_fields(nested_value)
+                )
+                for key, nested_value in item.items()
+            }
+        if isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+            return [redact_fields(nested_value) for nested_value in item]
+        return item
+
+    redacted_value = redact_fields(value)
+    if isinstance(redacted_value, str):
+        preview = redacted_value
+    else:
+        try:
+            preview = json.dumps(
+                redacted_value,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        except (TypeError, ValueError):
+            preview = str(redacted_value)
+
+    preview = _CONTROL_CHARACTERS.sub("�", preview)
+    for pattern in _SECRET_PATTERNS:
+        preview = pattern.sub(
+            lambda match: (
+                f"{match.group(1)}{match.group(2)}[REDACTED]"
+                if match.lastindex == 2
+                else "[REDACTED]"
+            ),
+            preview,
+        )
+
+    if len(preview) <= limit:
+        return preview
+
+    omitted = len(preview) - limit
+    return f"{preview[:limit]}\n… {omitted:,} characters omitted"
+
+
+def _update_messages(update: Any) -> list[BaseMessage]:
+    if not isinstance(update, Mapping):
+        return []
+
+    messages = update.get("messages", [])
+    if isinstance(messages, BaseMessage):
+        return [messages]
+    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
+        return []
+    return [message for message in messages if isinstance(message, BaseMessage)]
+
+
+def _print_payload(console: Console, value: Any, *, border_style: str) -> None:
+    preview = _safe_preview(value)
+    if not preview:
+        return
+    console.print(
+        Panel(
+            Text(preview),
+            border_style=border_style,
+            padding=(0, 1),
+            expand=False,
+        )
+    )
+
+
+def _print_activity_update(console: Console, update: Any) -> None:
+    """Render observable graph updates without exposing model reasoning."""
+    if not isinstance(update, Mapping):
+        return
+
+    for node_name, node_update in update.items():
+        messages = _update_messages(node_update)
+        rendered_message = False
+
+        for message in messages:
+            if isinstance(message, AIMessage):
+                if message.tool_calls:
+                    for tool_call in message.tool_calls:
+                        tool_name = str(tool_call.get("name") or "unknown_tool")
+                        label = Text("  → Tool call  ", style="tool")
+                        label.append(tool_name, style="bold white")
+                        console.print(label)
+                        _print_payload(
+                            console,
+                            tool_call.get("args", {}),
+                            border_style="magenta",
+                        )
+                else:
+                    console.print("  [success]✓ Response ready[/success]")
+                rendered_message = True
+                continue
+
+            if isinstance(message, ToolMessage):
+                tool_name = message.name or message.tool_call_id or "unknown_tool"
+                failed = getattr(message, "status", "success") == "error"
+                style = "error" if failed else "success"
+                marker = "✗" if failed else "←"
+                label = Text(f"  {marker} Tool result  ", style=style)
+                label.append(str(tool_name), style="bold white")
+                console.print(label)
+                _print_payload(
+                    console,
+                    message.text or message.content,
+                    border_style="red" if failed else "green",
+                )
+                rendered_message = True
+
+        if not rendered_message:
+            label = Text("  • Step  ", style="activity")
+            label.append(str(node_name), style="white")
+            console.print(label)
+
+
+def stream_agent_response(
+    chat_agent: Any,
+    invocation: Mapping[str, Any],
+    config: Mapping[str, Any],
+    *,
+    console: Console,
+) -> str:
+    """Stream agent activity and return the final response text."""
+    final_state: Mapping[str, Any] = {}
+    console.rule("[activity]Activity[/activity]", style="bright_blue")
+
+    with console.status(
+        "[accent]Waiting for the agent…[/accent]",
+        spinner="dots",
+        spinner_style="bright_cyan",
+    ) as status:
+        for stream_mode, chunk in chat_agent.stream(
+            dict(invocation),
+            config=dict(config),
+            stream_mode=["updates", "values"],
+        ):
+            if stream_mode == "values" and isinstance(chunk, Mapping):
+                final_state = chunk
+                continue
+            if stream_mode == "updates":
+                status.update("[accent]Agent is working…[/accent]")
+                _print_activity_update(console, chunk)
+
+    console.rule(style="bright_blue")
+    return response_text(_update_messages(final_state))
 
 
 def _database_label(database_url: str) -> str:
@@ -171,12 +343,12 @@ def run_chat(
         }
 
         try:
-            with console.status(
-                "[accent]Researching the database…[/accent]",
-                spinner="dots",
-                spinner_style="bright_cyan",
-            ):
-                result = chat_agent.invoke(invocation, config=config)
+            answer = stream_agent_response(
+                chat_agent,
+                invocation,
+                config,
+                console=console,
+            )
         except KeyboardInterrupt:
             console.print("\n[warning]Request cancelled.[/warning]")
             continue
@@ -184,7 +356,6 @@ def run_chat(
             _print_error(console, str(error) or type(error).__name__)
             continue
 
-        answer = response_text(result.get("messages", []))
         console.print(
             Panel(
                 Markdown(answer),
