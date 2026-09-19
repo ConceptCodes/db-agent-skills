@@ -4,6 +4,11 @@ from deepagents import create_deep_agent
 from langchain.agents.middleware import TodoListMiddleware
 from langgraph.checkpoint.memory import InMemorySaver
 
+from db_agent_skills.backend import (
+    SKILLS_SOURCE,
+    create_agent_backend,
+    create_agent_permissions,
+)
 from db_agent_skills.config import get_settings
 from db_agent_skills.model import create_chat_model
 from db_agent_skills.prompts import SYSTEM_PROMPT
@@ -18,13 +23,16 @@ toolkit_model = create_chat_model(settings)
 db_toolkit = create_db_toolkit(toolkit_model, settings.database_url)
 
 checkpointer = InMemorySaver()
+backend = create_agent_backend()
 
 agent = create_deep_agent(
     model=settings.model,
     tools=db_toolkit.get_tools(),
     system_prompt=SYSTEM_PROMPT,
     middleware=[TodoListMiddleware()],
-    skills=["/skills/"],
+    skills=[SKILLS_SOURCE],
+    backend=backend,
+    permissions=create_agent_permissions(),
     checkpointer=checkpointer,
     name="db_agent",
 )
