@@ -117,7 +117,7 @@ export DB_AGENT_DATABASE_URL="sqlite:///${PWD}/data/northwind.db"
 - [`model.py`](src/db_agent_skills/model.py) resolves the SQL toolkit's query-checker model.
 - [`tools.py`](src/db_agent_skills/tools.py) creates the LangChain `SQLDatabase` and `SQLDatabaseToolkit`.
 - [`prompts.py`](src/db_agent_skills/prompts.py) defines the read-first, bounded-query, no-guessing policy.
-- [`backend.py`](src/db_agent_skills/backend.py) mounts bundled skills read-only at `/skills/` while keeping other agent files in state.
+- [`backend.py`](src/db_agent_skills/backend.py) mounts bundled skills at `/skills/`, denies agent file-tool writes there, and keeps other agent files in state.
 - [`agent.py`](src/db_agent_skills/agent.py) constructs the Deep Agent with the project skill source and an in-memory checkpointer.
 - `skills/` provides progressively loaded, database-specific domain knowledge.
 
