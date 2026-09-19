@@ -9,6 +9,7 @@ from db_agent_skills.backend import (
     create_agent_permissions,
 )
 from db_agent_skills.config import get_settings
+from db_agent_skills.guardrails import create_agent_guardrails
 from db_agent_skills.model import create_chat_model
 from db_agent_skills.prompts import SYSTEM_PROMPT
 from db_agent_skills.tools import create_db_toolkit
@@ -28,6 +29,7 @@ agent = create_deep_agent(
     model=settings.model,
     tools=db_toolkit.get_tools(),
     system_prompt=SYSTEM_PROMPT,
+    middleware=create_agent_guardrails(toolkit_model),
     skills=[SKILLS_SOURCE],
     backend=backend,
     permissions=create_agent_permissions(),
