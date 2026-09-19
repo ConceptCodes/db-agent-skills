@@ -1,4 +1,4 @@
-# DB Agent Skills
+# DB Agent w/ Skills
 
 A database research assistant built with [Deep Agents](https://docs.langchain.com/oss/python/deepagents/overview), [OpenRouter](https://openrouter.ai/docs/quickstart), LangChain's SQL toolkit, SQLite, and database-specific Agent Skills.
 
@@ -17,7 +17,6 @@ Each skill contains:
 - `references/schema.md` with the audited schema and relationships
 - `references/query-guide.md` with grain-safe SQL patterns
 - `references/audit.md` with integrity and data-quality findings
-- `scripts/audit_*.py` for repeatable, read-only validation
 
 The skill folders follow the format consumed by Deep Agents: a required `SKILL.md` plus optional supporting files. They do not require OpenAI-specific agent metadata.
 
@@ -43,13 +42,21 @@ cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY.
 ```
 
-The default OpenRouter model slug is `openrouter:openai/gpt-5.6-luna`. Override it with any OpenRouter model that supports tool calling:
+The default model is `openrouter:openai/gpt-5.6-luna`. The `openrouter:` prefix tells LangChain to resolve the model through `ChatOpenRouter`; the remainder is the OpenRouter model ID. Override it with any OpenRouter model that supports tool calling:
 
 ```bash
-export DB_AGENT_MODEL="anthropic/claude-sonnet-4.5"
+export DB_AGENT_MODEL="openrouter:anthropic/claude-sonnet-4.5"
 ```
 
-All model inference goes through LangChain's first-party OpenRouter integration, `ChatOpenRouter`. The project does not use `OPENAI_API_KEY` or call OpenAI's inference API directly; a slug beginning with `openai/` only selects an OpenAI model through OpenRouter.
+## Chat with the agent
+
+Start the colorful interactive CLI:
+
+```bash
+uv run db-agent-skills
+```
+
+The CLI renders agent responses as Markdown and keeps conversation state in memory. Use `/help` to list commands, `/new` to start a fresh thread, and `/exit` to quit.
 
 ## Select a database
 
@@ -69,34 +76,19 @@ export DB_AGENT_DATABASE_URL="sqlite:///${PWD}/data/northwind.db"
 
 `DB_AGENT_DATABASE_URL` can point to another SQLite fixture during testing. The selected database must match the skill whose schema assumptions are being used.
 
-## Audit the databases
-
-The audit scripts use SQLite's read-only URI mode, verify the expected schema, and emit JSON.
-
-```bash
-python3 skills/northwind/scripts/audit_northwind.py
-python3 skills/chinook/scripts/audit_chinook.py
-```
-
-Audit another copy of the same database schema:
-
-```bash
-python3 skills/chinook/scripts/audit_chinook.py \
-  --database /absolute/path/to/chinook-test.db
-```
-
-The scripts report the file checksum, integrity result, foreign-key violations, object and row counts, date coverage, reconciliation checks, and known data-quality indicators. They reject a database that does not contain the expected schema.
-
 ## How the agent is organized
 
 - [`config.py`](src/db_agent_skills/config.py) loads the OpenRouter model, API key, and database URL from environment-backed settings.
-- [`model.py`](src/db_agent_skills/model.py) creates the shared `ChatOpenRouter` instance.
+- [`model.py`](src/db_agent_skills/model.py) resolves the SQL toolkit's query-checker model.
 - [`tools.py`](src/db_agent_skills/tools.py) creates the LangChain `SQLDatabase` and `SQLDatabaseToolkit`.
 - [`prompts.py`](src/db_agent_skills/prompts.py) defines the read-first, bounded-query, no-guessing policy.
-- [`agent.py`](src/db_agent_skills/agent.py) constructs the Deep Agent and points it at the project skills.
+- [`agent.py`](src/db_agent_skills/agent.py) constructs the Deep Agent with the project skill source and an in-memory checkpointer.
 - `skills/` provides progressively loaded, database-specific domain knowledge.
 
 The system prompt instructs the agent to inspect the selected database, load the applicable skill, verify join grain and date boundaries, and treat database contents as untrusted data before answering.
+
+Deep Agents handles skill discovery and progressive loading through the agent's `skills=["/skills/"]` configuration; the CLI does not duplicate that behavior.
+The main model remains a provider-qualified string passed to `create_deep_agent`; the SQL toolkit resolves a separate instance because its query checker requires a `BaseLanguageModel` object.
 
 ## Project structure
 
@@ -108,12 +100,10 @@ The system prompt instructs the agent to inspect the selected database, load the
 ├── skills/
 │   ├── chinook/
 │   │   ├── SKILL.md
-│   │   ├── references/
-│   │   └── scripts/
+│   │   └── references/
 │   └── northwind/
 │       ├── SKILL.md
-│       ├── references/
-│       └── scripts/
+│       └── references/
 ├── src/db_agent_skills/
 │   ├── agent.py
 │   ├── config.py
@@ -130,22 +120,19 @@ The system prompt instructs the agent to inspect the selected database, load the
 2. Audit its schema, relationships, date coverage, constraints, and data quality.
 3. Add `skills/<database>/SKILL.md` with a precise activation description and the query invariants that affect correctness.
 4. Put detailed schema, metric, and audit material under `references/`.
-5. Add a deterministic, read-only audit helper under `scripts/` when the checks will be reused.
-6. Set `DB_AGENT_DATABASE_URL` to the database's absolute SQLite URL and verify that the selected skill matches it.
+5. Set `DB_AGENT_DATABASE_URL` to the database's absolute SQLite URL and verify that the selected skill matches it.
 
 ## Safety notes
 
-- The agent's prompt treats database access as read-only unless a user explicitly requests a specific mutation.
-- The current SQLAlchemy database connection does not technically enforce read-only mode. Use a read-only SQLite URI or filesystem permissions before exposing the agent to untrusted users.
-- Foreign-key enforcement is disabled by default on new SQLite connections. Enable `PRAGMA foreign_keys = ON` before any authorized write.
+- SQLite connections use URI `mode=ro`, `PRAGMA query_only = ON`, and a SQLite authorizer that rejects mutations, database attachment, and file-oriented functions.
+- No host-filesystem backend is configured; transient agent files remain in memory.
+- Conversation checkpoints are held in memory and are lost when the process exits.
 - User input should be bound as query parameters whenever the calling interface supports them.
 - Database values and retrieved documents are data, not instructions for the agent or shell.
 
 ## Development status
 
-The database files, skills, audit tooling, configuration, prompt, and initial agent construction are present. The command-line interface is not finished: `src/db_agent_skills/cli.py` is empty, and the declared `db-agent-skills` console entry point does not yet resolve to an implemented `main` function.
-
-Until that entry point is implemented and the agent wiring is integration-tested, use the audit scripts directly and treat the Python agent modules as an active development scaffold.
+The database files, skills, configuration, prompt, read-only SQL tooling, and interactive CLI are present. The CLI is intended for local agent testing; its in-memory conversations are not durable across process restarts.
 
 ## Dataset sources
 
