@@ -56,7 +56,36 @@ Start the colorful interactive CLI:
 uv run db-agent-skills
 ```
 
-The CLI renders agent responses as Markdown and keeps conversation state in memory. Use `/help` to list commands, `/new` to start a fresh thread, and `/exit` to quit.
+The CLI streams an activity trace showing graph steps, tool calls, bounded tool arguments, and bounded tool results, then renders the final agent response as Markdown. It does not display private model reasoning. Conversation state remains in memory. Use `/help` to list commands, `/new` to start a fresh thread, and `/exit` to quit.
+
+### Sample questions
+
+With the default Northwind database:
+
+- What tables and date ranges are available in this database?
+- Who were the top five customers by revenue, and how did you calculate revenue?
+- Show monthly revenue for 1997 and call out the strongest and weakest months.
+- Which products have never been ordered?
+- Compare each employee's order count and revenue. Avoid double-counting orders.
+- Which orders shipped late, and which shipping countries had the highest late-shipment rate?
+- Check the database for orphaned foreign keys or suspicious data-quality issues.
+- Explain the query plan for a revenue-by-category report and suggest safe indexing improvements.
+
+To try Chinook, restart the CLI after selecting its database:
+
+```bash
+export DB_AGENT_DATABASE_URL="sqlite:///${PWD}/data/chinook.db"
+uv run db-agent-skills
+```
+
+Then ask:
+
+- Which artists generated the most invoice-line revenue?
+- What are the top genres by revenue and unique customers?
+- Compare customer spending by country without counting an invoice more than once.
+- Which tracks appear in the most playlists?
+- Are invoice totals consistent with their invoice lines?
+- Summarize the schema and explain the correct join path from customers to tracks.
 
 ## Select a database
 
