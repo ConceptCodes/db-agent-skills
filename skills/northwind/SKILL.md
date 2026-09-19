@@ -7,14 +7,13 @@ description: Query, explain, and audit the bundled Northwind SQLite database for
 
 Use the repository's `data/northwind.db` as the canonical Northwind artifact. Resolve it from the repository root, not from the process working directory. The application can select another database through `DB_AGENT_DATABASE_URL`; confirm the selected database is Northwind before relying on this skill's schema facts.
 
-Default to read-only work. Use `SELECT`, `WITH`, `EXPLAIN QUERY PLAN`, and non-mutating PRAGMAs unless the user explicitly requests a database change. If a requested write depends on foreign keys, enable `PRAGMA foreign_keys = ON` for that connection first.
+Database access is read-only. Use `SELECT`, `WITH`, `EXPLAIN QUERY PLAN`, and non-mutating PRAGMAs. Do not attempt data or schema changes.
 
 ## Route the task
 
 - Read [references/schema.md](references/schema.md) before writing joins or choosing tables.
 - Read [references/query-guide.md](references/query-guide.md) for sales, order, customer, shipping, employee, or inventory analysis.
 - Read [references/audit.md](references/audit.md) for data-quality, integrity, performance, provenance, or legacy-view questions.
-- Run `python3 skills/northwind/scripts/audit_northwind.py` when the database file changes or when current audit evidence is required. Pass another file with `--database PATH` when validating a Northwind test fixture.
 
 ## Query invariants
 

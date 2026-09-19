@@ -10,7 +10,7 @@ Audit performed on 2026-09-18 against `data/chinook.db`.
 - Page size: 4,096 bytes
 - Schema: 11 tables, 0 views, 0 triggers, 11 explicit foreign-key indexes
 
-Re-run `python3 skills/chinook/scripts/audit_chinook.py` rather than assuming these facts still hold after the file changes.
+These findings apply only to the fingerprinted database artifact. Re-audit independently after replacing or modifying the file.
 
 ## Integrity and reconciliation
 
@@ -23,7 +23,7 @@ Re-run `python3 skills/chinook/scripts/audit_chinook.py` rather than assuming th
 - No audited invoice total or line price is negative or zero, and no line quantity is nonpositive.
 - Historical line prices currently match catalog prices, but queries should still use `InvoiceLine.UnitPrice` for historical attribution.
 - Foreign-key actions are `NO ACTION`.
-- `PRAGMA foreign_keys` is `0` on a new connection. Enable it explicitly before authorized writes.
+- `PRAGMA foreign_keys` is `0` on a new connection. The agent's connection is enforced as read-only and cannot perform writes.
 
 ## Scale and coverage
 

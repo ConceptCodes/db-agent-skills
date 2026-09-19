@@ -7,14 +7,13 @@ description: Query, explain, and audit the bundled Chinook SQLite database for m
 
 Use the repository's `data/chinook.db` as the canonical Chinook artifact. Resolve it from the repository root, not from the process working directory. The application can select another database through `DB_AGENT_DATABASE_URL`; confirm the selected database is Chinook before relying on this skill's schema facts.
 
-Default to read-only work. Use `SELECT`, `WITH`, `EXPLAIN QUERY PLAN`, and non-mutating PRAGMAs unless the user explicitly requests a database change. If a requested write depends on foreign keys, enable `PRAGMA foreign_keys = ON` for that connection first.
+Database access is read-only. Use `SELECT`, `WITH`, `EXPLAIN QUERY PLAN`, and non-mutating PRAGMAs. Do not attempt data or schema changes.
 
 ## Route the task
 
 - Read [references/schema.md](references/schema.md) before writing joins or choosing tables.
 - Read [references/query-guide.md](references/query-guide.md) for revenue, customer, artist, genre, employee, track, or playlist analysis.
 - Read [references/audit.md](references/audit.md) for data-quality, integrity, provenance, or limitation questions.
-- Run `python3 skills/chinook/scripts/audit_chinook.py` when the database file changes or current audit evidence is required. Pass another file with `--database PATH` when validating a Chinook test fixture.
 
 ## Query invariants
 

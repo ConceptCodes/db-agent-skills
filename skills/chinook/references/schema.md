@@ -74,4 +74,4 @@ All audited tracks have an album, genre, media type, positive duration, byte siz
 - There are no views or triggers.
 - Eleven explicit non-unique indexes cover foreign-key columns; the composite playlist membership primary key has an automatic unique index.
 - Foreign keys are declared and currently valid, but enforcement is disabled by default for a new SQLite connection.
-- The schema has no `CHECK` constraints for positive quantities, prices, totals, durations, or byte counts. The audited rows are valid, but authorized writes need application-side validation.
+- The schema has no `CHECK` constraints for positive quantities, prices, totals, durations, or byte counts. The audited rows are valid, but any external writer needs application-side validation.
